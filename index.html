@@ -402,47 +402,58 @@ let trip=null;
 async function generate(){
   const dest=document.getElementById('dest').value.trim();
   if(!dest){document.getElementById('dest').focus();return;}
-  const dur=document.getElementById('dur').value;
+  const dur=parseInt(document.getElementById('dur').value);
   const budget=document.getElementById('budget').value;
   const occasion=document.getElementById('occasion').value;
   const vibes=[...document.querySelectorAll('.chip.on')].map(c=>c.dataset.v).join(', ')||'romance';
   const btn=document.getElementById('planbtn');
-  btn.disabled=true;btn.textContent='♡ Crafting your plan…';
+  btn.disabled=true;
   const res=document.getElementById('results');
   res.style.display='block';
-  document.getElementById('iti').innerHTML=`<div class="loading"><div class="spinner"></div><h3>Planning your ${dest} escape…</h3><p>Finding romantic spots, sunset dinners & perfect hotels</p></div>`;
   rt('iti',document.querySelector('.rtab'));
   res.scrollIntoView({behavior:'smooth',block:'start'});
+  trip={destination:dest,duration:dur,days:[],hotels:[],highlights:[],couple_tips:[],tips:{},tagline:''};
 
-  const prompt=`Create a honeymoon trip plan. Destination:${dest}, Days:${dur}, Budget:${budget}, Occasion:${occasion}, Interests:${vibes}. Use real place names and real prices. Respond ONLY with this exact JSON structure, no extra text:
-{"destination":"City Country","duration":${dur},"tagline":"Short romantic sentence","days":[{"day":1,"theme":"Day theme","activities":[{"time":"9:00 AM","name":"Place name","description":"2 sentences max.","tip":"1 insider tip.","romantic":true},{"time":"1:00 PM","name":"Restaurant","description":"2 sentences.","tip":"Tip.","romantic":false},{"time":"4:00 PM","name":"Activity","description":"2 sentences.","tip":"Tip.","romantic":true},{"time":"7:30 PM","name":"Dinner spot","description":"2 sentences.","tip":"Tip.","romantic":true}]}],"hotels":[{"name":"Hotel 1","category":"Luxury","stars":5,"price":280,"perk":"Feature","desc":"2 sentences.","why":"1 sentence.","query":"hotel city"},{"name":"Hotel 2","category":"Mid-range","stars":4,"price":120,"perk":"Feature","desc":"2 sentences.","why":"1 sentence.","query":"hotel city"},{"name":"Hotel 3","category":"Boutique","stars":4,"price":150,"perk":"Feature","desc":"2 sentences.","why":"1 sentence.","query":"hotel city"},{"name":"Hotel 4","category":"Budget","stars":3,"price":60,"perk":"Feature","desc":"2 sentences.","why":"1 sentence.","query":"hotel city"}],"highlights":[{"name":"Spot 1","day":1,"time":"Morning","why":"5 words"},{"name":"Spot 2","day":1,"time":"Evening","why":"5 words"},{"name":"Spot 3","day":2,"time":"Morning","why":"5 words"},{"name":"Spot 4","day":2,"time":"Afternoon","why":"5 words"},{"name":"Spot 5","day":3,"time":"Morning","why":"5 words"},{"name":"Spot 6","day":3,"time":"Evening","why":"5 words"}],"couple_tips":["Tip 1","Tip 2","Tip 3","Tip 4","Tip 5"],"tips":{"transport":["Tip 1","Tip 2"],"money":["Tip 1","Tip 2"],"food":["Tip 1","Tip 2"],"culture":["Tip 1","Tip 2"],"safety":["Tip 1","Tip 2"]}}`;
+  async function callAPI(body){
+    const r=await fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    return r.json();
+  }
+  function parseJ(raw){
+    try{return JSON.parse(raw.replace(/```json|```/g,'').trim());}catch(e){return null;}
+  }
+  function showP(msg){
+    document.getElementById('iti').innerHTML=`<div class="loading"><div class="spinner"></div><h3>${msg}</h3><p>Building your personalised plan…</p></div>`;
+  }
 
   try{
-    const r=await fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:prompt}]})});
-    const d=await r.json();
-    if(!d.content){
-      const msg=d.error?.message||JSON.stringify(d);
-      document.getElementById('iti').innerHTML=`<div class="errbox">⚠ API error: ${msg}<br><br>Go to Vercel → your project → Settings → Environment Variables → add <b>GROQ_API_KEY</b></div>`;
-      btn.disabled=false;btn.textContent='♡ Plan our perfect trip';return;
+    showP(`Planning your ${dest} escape…`);
+    const metaRes=await callAPI({type:'meta',dest,dur,budget,occasion,vibes});
+    if(metaRes.error)throw new Error(metaRes.error);
+    const meta=parseJ(metaRes.data);
+    if(meta){
+      trip.tagline=meta.tagline||'';
+      trip.hotels=meta.hotels||[];
+      trip.highlights=meta.highlights||[];
+      trip.couple_tips=meta.couple_tips||[];
+      trip.tips=meta.tips||{};
     }
-    const raw=d.content.map(i=>i.text||'').join('');
-    const cleaned = raw.replace(/```json|```/g,'').trim();
-    // Fix truncated JSON by attempting parse, show clear error if broken
-    try {
-      trip=JSON.parse(cleaned);
-    } catch(pe) {
-      document.getElementById('iti').innerHTML=`<div class="errbox">⚠ The AI response was too long and got cut off. Please try again — it usually works on the second attempt!</div>`;
-      btn.disabled=false;btn.textContent='♡ Plan our perfect trip';
-      return;
+    for(let d=1;d<=dur;d++){
+      showP(`Planning Day ${d} of ${dur}…`);
+      const dayRes=await callAPI({type:'day',dest,dur,budget,occasion,vibes,day:d});
+      if(dayRes.error)throw new Error(dayRes.error);
+      const dayData=parseJ(dayRes.data);
+      if(dayData)trip.days.push(dayData);
+      rIti(trip);
     }
-    renderAll(trip);
+    rHot(trip);rHl(trip);rTip(trip);
+    rt('iti',document.querySelector('.rtab'));
   }catch(e){
-    document.getElementById('iti').innerHTML=`<div class="errbox">⚠ ${e.message}<br><br>Make sure GROQ_API_KEY is set in Vercel → project → Settings → Environment Variables.</div>`;
+    document.getElementById('iti').innerHTML=`<div class="errbox">⚠ ${e.message}<br><br>Make sure GROQ_API_KEY is set in Vercel → Settings → Environment Variables.</div>`;
   }
   btn.disabled=false;btn.textContent='♡ Plan our perfect trip';
 }
 
-function renderAll(t){rIti(t);rHot(t);rHl(t);rTip(t);rt('iti',document.querySelector('.rtab'));}
+function renderAll(t){rIti(t);rHot(t);rHl(t);rTip(t);}
 
 function rIti(t){
   const total=t.days.reduce((a,d)=>a+d.activities.length,0);
